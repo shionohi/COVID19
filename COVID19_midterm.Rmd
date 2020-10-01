@@ -1,0 +1,272 @@
+---
+title: "Midterm"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load package
+library(readr)     # Used for reading data
+library(dplyr)     # Used for data manipulation
+library(tidyr)     # Used for tidying data  
+library(leaflet)   # The map-making package
+library(geojsonio) # A package for geographic and spatial data, requires the latest version of dplyr
+library(shiny)     # Used for creating App including UI and server
+library(ggplot2)   # Used for creating plot
+
+```
+
+```{r}
+# Read the Data for COVID19
+COVID19 <- read_csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv")
+head(COVID19)
+```
+
+```{r}
+# Read the data for country, longitude, and latitude
+loc <- read.csv("https://raw.githubusercontent.com/albertyw/avenews/master/old/data/average-latitude-longitude-countries.csv")
+```
+
+```{r}
+COVID19 <- COVID19[c(2:4, 11, 12, 14, 15, 32, 41)]
+COVID19 <- na.omit(COVID19)
+dim(COVID19)
+```
+
+```{r}
+# tidy data
+COVID19 <- separate(COVID19, date, into = c("year", "month", "date"), sep = "-")
+```
+
+```{r}
+# drop last years' information
+COVID19 <- filter(COVID19, year == 2020)
+```
+
+```{r}
+COVID19$year <- parse_number(COVID19$year)
+COVID19$month <- parse_number(COVID19$month)
+COVID19$date <- parse_number(COVID19$date)
+```
+
+```{r}
+# for the first data representation
+COVID_by_location_and_gdp <- group_by(COVID19, location, gdp_per_capita)
+COVID_by_location_and_index <- group_by(COVID19, location, human_development_index)
+COVID_by_month <- group_by(COVID19, month)
+COVID_by_date <- group_by(COVID19, date)
+# for the third data representation
+COVID_by_continent_and_location <- group_by(COVID19, continent, location)
+```
+
+```{r}
+head(COVID_by_continent_and_location)
+```
+
+```{r}
+# create data table for the first data representation
+table1 <- summarize(COVID_by_location_and_gdp, total_cases_mean_per_million = mean(total_cases_per_million), 
+                    new_cases_mean_per_million = mean(new_cases_per_million))
+table2 <- summarize(COVID_by_location_and_index, total_cases_meanper_million = mean(total_cases_per_million), 
+                    new_cases_mean_per_million = mean(new_cases_per_million)) 
+table3 <- summarize(COVID_by_month, total_cases_mean_per_million = mean(total_cases_per_million), 
+                    new_cases_mean_per_million = mean(new_cases_per_million))  
+table4 <- summarize(COVID_by_date, total_cases_mean_per_million = mean(total_cases_per_million), 
+                    new_cases_mean_per_million = mean(new_cases_per_million))  
+```
+
+```{r}
+# create data table and visualication for the third data
+table5 <- summarize(COVID_by_continent_and_location, total_cases_mean = mean(total_cases_per_million), 
+                    new_cases_mean = mean(new_cases_per_million))
+
+# convert to dataframe
+table5 <- as.data.frame(table5)
+
+colnames(loc)[2] <- "location"
+# join the loc into table5 to get latitude and longitude
+table5 <- full_join(table5, loc, by = "location")
+
+pal1 <- colorBin("magma", domain = table5$total_cases_mean)
+pal2 <- colorBin("viridis", domain = table5$new_cases_mean)
+
+Map1 <- leaflet(data = table5) %>% addTiles() %>%
+  addCircleMarkers(
+    lng = ~Longitude, lat = ~Latitude,
+    fillColor = pal1(table5$total_cases_mean),
+    label = ~paste(location, ":", total_cases_mean),
+    opacity = 1,
+    fillOpacity = 3,
+    stroke = FALSE,
+    radius = 5
+    ) %>%
+  addLegend(pal = pal1, values = table5$total_cases_mean,
+            title = "total cases per million", position = "bottomright")
+
+Map2 <- leaflet(data = table5) %>% addTiles() %>%
+  addCircleMarkers(
+    lng = ~Longitude, lat = ~Latitude,
+    fillColor = pal2(table5$new_cases_mean),
+    label = ~paste(location, ":", new_cases_mean),
+    opacity = 1,
+    fillOpacity = 3,
+    stroke = FALSE,
+    radius = 5
+    ) %>%
+  addLegend(pal = pal2, values = table5$new_cases_mean,
+            title = "new cases per million", position = "bottomright")
+
+```
+
+```{r}
+names(loc)[2] <- "location"
+data <- full_join(COVID19, loc, by = "location")
+head(data)
+```
+
+```{r}
+# create the data for 4th graphics representation
+Map3 <- function(df){
+  df <- group_by(df, location, Longitude, Latitude)
+  gen_data <- summarize(df, new_cases_sum = sum(new_cases_per_million))
+  gen_data
+  pal3 <- colorBin("viridis", domain = gen_data$new_cases_sum)
+
+  leaflet(gen_data) %>% addTiles() %>%
+    addCircleMarkers(
+      lng = ~gen_data$Longitude, lat = ~gen_data$Latitude,
+      fillColor = pal3(gen_data$new_cases_sum),
+      label = ~paste(location, ":", gen_data$new_cases_sum),
+      opacity = 1,
+      fillOpacity = 3,
+      stroke = FALSE,
+      radius = 5) %>%
+    addLegend(pal = pal3, values = gen_data$new_cases_sum,
+              title = "sum of new cases found", position = "bottomright")
+}
+```
+
+```{r}
+# create UI 
+
+library(shiny)
+library(ggplot2)
+
+ui <- fluidPage(
+  # title
+  titlePanel("COVID-19 status quo (2020)"),
+
+  #input
+  sidebarLayout(
+  sidebarPanel(
+    helpText("Display COVID-19 information from Our World in Data."),
+    
+    selectInput("Table_Data",
+                label = "Select the summary of Data to display",
+                choices = list("location, gdp, total cases, new cases",
+                               "location, dev index, total cases, new cases",
+                               "month, total cases, new cases",
+                               "date, total cases, new cases",
+                               "NONE"),
+                selected = "NONE",
+                ),
+   
+    selectInput("In_depth_visualization",
+                label = "Select the Data to plot",
+                choices = list("NONE",
+                               "total cases per million",
+                               "new cases per million"),
+                selected = "NONE"),
+    selectInput("Month",
+                label = "Select Month?",
+                choices = list("Jan",
+                               "Feb",
+                               "Mar",
+                               "Apr",
+                               "May",
+                               "Jun",
+                               "Jul",
+                               "Aug",
+                               "Sep",
+                               "NONE"),
+                selected = "NONE"),
+  ),
+    # Main panel for displaying outputs ----
+    mainPanel(
+      leafletOutput("Month"),
+      dataTableOutput("table"),
+      leafletOutput("graphics"),
+    )
+))
+```
+
+```{r}
+# create server
+
+server <- function(input, output){
+
+  output$Month <- renderLeaflet(
+    if(input$Month == "Jan"){
+      df <- filter(data, month == 1)
+      Map3(df)
+    } else if (input$Month == "Feb"){
+      df <- filter(data, month == 1)
+      Map3(df)
+    } else if (input$Month == "Mar"){
+      df <- filter(data, month == 3)
+      Map3(df)
+    } else if (input$Month == "Apr"){
+      df <- filter(data, month == 4)
+      Map3(df)
+    } else if (input$Month == "May"){
+      df <- filter(data, month == 5)
+      Map3(df)
+    } else if (input$Month == "Jun"){
+      df <- filter(data, month == 6)
+      Map3(df)
+    } else if (input$Month == "Jul"){
+      df <- filter(data, month == 7)
+      Map3(df)
+    } else if (input$Month == "Aug"){
+      df <- filter(data, month == 8)
+      Map3(df)
+    } else if (input$Month == "Sep"){
+      df <- filter(data, month == 9)
+      Map3(df)
+    }
+  )
+  
+   output$table <- renderDataTable(
+     if(input$Table_Data == "location, gdp, total cases, new cases"){
+     table1
+     } else if (input$Table_Data == "location, dev index, total cases, new cases"){
+     table2
+     } else if (input$Table_Data == "month, total cases, new cases"){
+     table3  
+     } else if (input$Table_Data == "date, total cases, new case"){
+     table4
+     } 
+   )
+  
+   output$graphics <- renderLeaflet(
+     if(input$In_depth_visualization == "total cases per million"){
+       Map1
+     } else if (input$In_depth_visualization == "new cases per million"){
+       Map2
+     }
+   )
+}
+```
+
+
+```{r}
+# run the app
+shinyApp(ui, server)
+```
+```{r}
+
+```
+
